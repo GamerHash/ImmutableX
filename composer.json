@@ -10,12 +10,5 @@
         "psr-4": {
             "SocialiteProviders\\ImmutableX\\": ""
         }
-    },
-    "extra": {
-        "laravel": {
-            "providers": [
-                "SocialiteProviders\\ImmutableX\\ImmutableXExtendSocialite"
-            ]
-        }
     }
 }

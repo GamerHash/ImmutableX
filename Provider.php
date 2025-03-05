@@ -2,20 +2,36 @@
 
 namespace SocialiteProviders\ImmutableX;
 
+use Firebase\JWT\JWK;
+use Firebase\JWT\JWT;
+use Illuminate\Support\Arr;
+use Illuminate\Support\Facades\Http;
+use Laravel\Socialite\Two\InvalidStateException;
 use SocialiteProviders\Manager\OAuth2\AbstractProvider;
 use SocialiteProviders\Manager\OAuth2\User;
-use SocialiteProviders\Manager\OAuth2\ProviderInterface;
 
-class Provider extends AbstractProvider implements ProviderInterface
+class Provider extends AbstractProvider
 {
-    protected $scopes = ['openid', 'email', 'offline_access'];
+    protected $scopes = ['openid', 'email', 'offline_access', 'profile'];
 
-    /**
-     * Get the authorization URL for Immutable X OAuth2.
-     */
+    protected $stateless = true;
+
     protected function getAuthUrl($state)
     {
-        return $this->buildAuthUrlFromBase('https://auth.immutable.com/oauth/authorize', $state);
+        return $this->buildAuthUrlFromBase(
+            'https://auth.immutable.com/oauth/authorize',
+            $state
+        );
+    }
+
+    protected function buildAuthUrlFromBase($url, $state)
+    {
+        $query = http_build_query($this->getCodeFields($state), '', '&', $this->encodingType);
+
+        // Ensure scopes use space (%20) instead of commas (%2C)
+        $query = str_replace('%2C', '%20', $query);
+
+        return $url . '?' . $query;
     }
 
     /**
@@ -31,9 +47,10 @@ class Provider extends AbstractProvider implements ProviderInterface
      */
     public function getUserByToken($token)
     {
-        $response = $this->getHttpClient()->get('https://auth.immutable.com/userinfo', [
-            'headers' => ['Authorization' => 'Bearer ' . $token],
-        ]);
+        $response = Http::withHeaders([
+            'Authorization' => 'Bearer ' . $token,
+        ])->get('https://auth.immutable.com/userinfo')->getBody();
+
 
         return json_decode($response->getBody(), true);
     }
@@ -44,12 +61,78 @@ class Provider extends AbstractProvider implements ProviderInterface
     protected function mapUserToObject(array $user)
     {
         return (new User())->setRaw($user)->map([
-            'id'       => $user['sub'] ?? null,
+            'id' => $user['sub'] ?? null,
             'nickname' => null,
-            'name'     => null,
-            'email'    => $user['email'] ?? null,
-            'avatar'   => null,
+            'name' => null,
+            'email' => $user['email'] ?? null,
+            'avatar' => null,
             'email_verified' => $user['email_verified'] ?? false,
         ]);
+    }
+
+    public function getAccessTokenResponse($code)
+    {
+        $fields = Arr::except($this->getTokenFields($code), ['client_secret']);
+
+        $response = Http::asForm()->post($this->getTokenUrl(), $fields);
+
+        return json_decode($response->getBody(), true);
+    }
+
+    public function user()
+    {
+        if ($this->user) {
+            return $this->user;
+        }
+
+        if ($this->hasInvalidState()) {
+            throw new InvalidStateException;
+        }
+
+        $response = $this->getAccessTokenResponse($this->getCode());
+
+        if (empty($response['id_token'])) {
+            throw new \Exception("ID Token is missing from the response.");
+        }
+
+        $this->credentialsResponseBody = $response;
+
+        $user = $this->decodeIdToken($response['id_token']);
+
+        $token = $this->parseAccessToken($response);
+
+        $this->user = $this->mapUserToObject($user);
+
+        if ($this->user instanceof User) {
+            $this->user->setAccessTokenResponseBody($this->credentialsResponseBody);
+        }
+
+        return $this->user->setToken($token)
+            ->setRefreshToken($this->parseRefreshToken($response))
+            ->setExpiresIn($this->parseExpiresIn($response))
+            ->setApprovedScopes($this->parseApprovedScopes($response));
+    }
+
+    /**
+     * Decode and validate ID Token.
+     */
+    public function decodeIdToken($idToken)
+    {
+        try {
+            // Fetch ImmutableX public keys
+            $keysResponse = $this->getHttpClient()->get('https://auth.immutable.com/.well-known/jwks.json');
+            $keys = json_decode($keysResponse->getBody(), true);
+
+            if (empty($keys['keys'])) {
+                throw new \Exception("Failed to fetch ImmutableX public keys.");
+            }
+
+            // Decode and verify the ID Token
+            $decoded = JWT::decode($idToken, JWK::parseKeySet($keys));
+
+            return (array)$decoded;
+        } catch (\Exception $e) {
+            throw new \Exception("Invalid ID Token: " . $e->getMessage());
+        }
     }
 }

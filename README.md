@@ -10,7 +10,7 @@ To install the Immutable X Socialite provider, run:
 
 ```bash
 composer require socialiteproviders/immutablex
-
+```
 
 ## Installation & Basic Usage
 
@@ -84,29 +84,11 @@ $user->token;         // OAuth access token
 
 ```
 
-
-Stateless Mode (For APIs)
-
-If you’re using an API-based authentication and don’t use sessions, ensure that you call stateless() before retrieving the user:
-
-``` php
-
-$user = Socialite::driver('immutablex')->stateless()->user();
-
-
-```
-
 ### 🔄 Returned User Fields
 
 - ``sub`` (**string**) Unique identifier for the user's account. e.g. `248289761001`
 - ``email`` (**string**) User's email address.
 - ``token`` (**string**) OAuth access token.
-
-### 🔬 Testing
-
-```bash
-vendor/bin/phpunit tests
-```
 
 ### 📜 License
 

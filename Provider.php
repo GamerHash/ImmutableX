@@ -12,9 +12,13 @@ use SocialiteProviders\Manager\OAuth2\User;
 
 class Provider extends AbstractProvider
 {
-    protected $scopes = ['openid', 'email', 'offline_access', 'profile'];
+    protected $scopes = ['openid', 'email', 'offline_access', 'transact'];
 
     protected $stateless = true;
+
+    protected $usesPKCE = true;
+
+    protected $scopeSeparator = ' ';
 
     protected function getAuthUrl($state)
     {
@@ -22,16 +26,6 @@ class Provider extends AbstractProvider
             'https://auth.immutable.com/oauth/authorize',
             $state
         );
-    }
-
-    protected function buildAuthUrlFromBase($url, $state)
-    {
-        $query = http_build_query($this->getCodeFields($state), '', '&', $this->encodingType);
-
-        // Ensure scopes use space (%20) instead of commas (%2C)
-        $query = str_replace('%2C', '%20', $query);
-
-        return $url . '?' . $query;
     }
 
     /**
@@ -52,7 +46,7 @@ class Provider extends AbstractProvider
         ])->get('https://auth.immutable.com/userinfo')->getBody();
 
 
-        return json_decode($response->getBody(), true);
+        return json_decode($response, true);
     }
 
     /**
@@ -67,6 +61,7 @@ class Provider extends AbstractProvider
             'email' => $user['email'] ?? null,
             'avatar' => null,
             'email_verified' => $user['email_verified'] ?? false,
+            'passport' => json_decode(json_encode($user['passport']), true) ?? [],
         ]);
     }
 
@@ -90,7 +85,6 @@ class Provider extends AbstractProvider
         }
 
         $response = $this->getAccessTokenResponse($this->getCode());
-
         if (empty($response['id_token'])) {
             throw new \Exception("ID Token is missing from the response.");
         }
